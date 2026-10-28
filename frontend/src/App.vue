@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { RepoService, ConfigService } from '../bindings/mvnmanager/services'
 import { Events } from '@wailsio/runtime'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ArtifactCoordinate, TabItem, VersionGroup, AppConfig, RepositoryInfo, RepositoryOverview } from './types'
 
 import TopBar from './components/TopBar.vue'
@@ -187,7 +187,6 @@ const handleSwitchRepo = async (repoId: string) => {
   const previousRepoId = activeRepoId.value
   activeRepoId.value = repoId
   repositoryOverview.value = repositoryInfos.value[repoId]?.overview ?? null
-  treeData.value = []
   try {
     await ConfigService.SaveConfig(appConfig.value)
   } catch (error) {
@@ -197,6 +196,7 @@ const handleSwitchRepo = async (repoId: string) => {
     return
   }
   
+  treeData.value = []
   openedTabs.value = openedTabs.value.filter(t => t.type === 'cleanup')
   exportItems.value = []
   if (openedTabs.value.length > 0) activeTab.value = openedTabs.value[0].id
@@ -204,6 +204,20 @@ const handleSwitchRepo = async (repoId: string) => {
   
   tabDataMap.value = {}
   selectedVersionMap.value = {}
+  const repository = appConfig.value.repositories.find(repo => repo.id === repoId)
+  try {
+    await ElMessageBox.confirm(
+      `已切换到“${repository?.name || '所选仓库'}”。是否立即扫描并加载仓库内容？选择暂不扫描时，将显示已有统计数据，依赖列表需要扫描后才能浏览。`,
+      '扫描仓库',
+      {
+        type: 'info',
+        confirmButtonText: '立即扫描',
+        cancelButtonText: '暂不扫描'
+      }
+    )
+  } catch {
+    return
+  }
   await startScan()
 }
 
@@ -404,15 +418,10 @@ const handleTabChange = (tabId: string) => {
 
 <template>
   <div class="app-container" style="--wails-draggable: no-drag;">
-    <TopBar 
+    <TopBar
       :repositories="appConfig?.repositories || []"
       :activeRepoId="activeRepoId"
-      :isScanning="isScanning" 
-      @update:activeRepoId="handleSwitchRepo"
-      @scan="startScan" 
       @open-settings="showSettings = true"
-      @open-cleanup="openCleanupPanel"
-      @open-repo-manager="showRepoManager = true"
     />
     
     <ScanDialog 

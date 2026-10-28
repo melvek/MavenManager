@@ -32,6 +32,17 @@ const scanPercentage = computed(() => {
   return Math.min(100, Math.floor(scannedFiles.value / totalFiles.value * 100))
 })
 
+const categoryOptions = [
+  { key: 'lastUpdated', label: '下载失败标记', optionLabel: '下载失败标记 (.lastUpdated)' },
+  { key: 'remote', label: '来源记录', optionLabel: '来源记录 (_remote.repositories)' },
+  { key: 'inProgress', label: '中断残留', optionLabel: '中断残留 (*.in-progress)' },
+  { key: 'zeroByte', label: '零字节文件', optionLabel: '零字节文件 (0B Jar/Pom)' },
+  { key: 'emptyDir', label: '空文件夹', optionLabel: '空文件夹' },
+  { key: 'missingJar', label: '缺失 JAR', optionLabel: 'POM 声明为 JAR 但缺少 JAR' }
+] as const
+type GarbageCategory = typeof categoryOptions[number]['key']
+type CategoryFilter = 'all' | GarbageCategory
+
 // 扫描选项
 const options = ref({
   lastUpdated: true,
@@ -41,6 +52,34 @@ const options = ref({
   emptyDir: true,
   missingJar: true
 })
+const scannedCategories = ref<GarbageCategory[]>([])
+const activeCategory = ref<CategoryFilter>('all')
+const hasSelectedOptions = computed(() => Object.values(options.value).some(Boolean))
+const categoryCounts = computed(() =>
+  categoryOptions
+    .filter(({ key }) => scannedCategories.value.includes(key))
+    .map(({ key, label }) => ({
+      key,
+      label,
+      count: results.value.filter(item => item.category === key).length
+    }))
+    .filter(category => category.count > 0)
+)
+const filteredResults = computed(() =>
+  activeCategory.value === 'all'
+    ? results.value
+    : results.value.filter(item => item.category === activeCategory.value)
+)
+const categoryLabel = (category: string) =>
+  categoryOptions.find(option => option.key === category)?.label ?? category
+
+const selectCategory = (category: CategoryFilter) => {
+  if (activeCategory.value === category) return
+  activeCategory.value = category
+  resultsTableRef.value?.clearSelection()
+  selectedRows.value = []
+  totalSelectedSize.value = 0
+}
 
 // 计算属性：全选状态
 const isAllSelected = computed(() => {
@@ -96,22 +135,6 @@ const handleSelectionChange = (val: GarbageItem[]) => {
   }, 0)
 }
 
-const selectableResults = computed(() => results.value)
-const isAllResultsSelected = computed(() =>
-  selectableResults.value.length > 0 &&
-  selectableResults.value.every(item => selectedRows.value.some(selected => selected.id === item.id))
-)
-
-const toggleSelectAllResults = () => {
-  if (isAllResultsSelected.value) {
-    resultsTableRef.value?.clearSelection()
-    return
-  }
-  selectableResults.value.forEach(item => {
-    resultsTableRef.value?.toggleRowSelection(item, true)
-  })
-}
-
 const getVersionKey = (item: GarbageItem) =>
   item.groupId && item.artifactId && item.version
     ? `${item.groupId}:${item.artifactId}:${item.version}`
@@ -121,6 +144,9 @@ const removeDeletedResults = (paths: string[], deletedVersions: Set<string> = ne
   results.value = results.value.filter(item =>
     !paths.includes(item.path) && !deletedVersions.has(getVersionKey(item))
   )
+  if (activeCategory.value !== 'all' && !results.value.some(item => item.category === activeCategory.value)) {
+    activeCategory.value = 'all'
+  }
   resultsTableRef.value?.clearSelection()
   selectedRows.value = []
   totalSelectedSize.value = 0
@@ -258,6 +284,14 @@ onUnmounted(() => {
 // 扫描与删除
 const startScan = async () => {
   if (!props.repoPath || isScanning.value) return
+  if (!hasSelectedOptions.value) {
+    ElMessage.warning('请至少选择一种扫描类型。')
+    return
+  }
+  scannedCategories.value = categoryOptions
+    .filter(({ key }) => options.value[key])
+    .map(({ key }) => key)
+  activeCategory.value = 'all'
   isScanning.value = true
   scanFinished.value = false
   results.value = []
@@ -269,7 +303,7 @@ const startScan = async () => {
   currentPath.value = ''
 
   try {
-    await RepoService.StartGarbageScan(props.repoPath, options.value)
+    await RepoService.StartGarbageScan(props.repoPath, { ...options.value })
   } catch (e) {
     isScanning.value = false
     ElMessage.error(`无法开始扫描：${String(e)}`)
@@ -340,32 +374,54 @@ const handleDelete = async () => {
         <el-checkbox 
           :model-value="isAllSelected" 
           :indeterminate="isIndeterminate"
+          :disabled="isScanning"
           @change="handleSelectAll"
         >
           全选
         </el-checkbox>
-        <el-button link type="primary" size="small" @click="handleInvertSelect">反选</el-button>
+        <el-button link type="primary" size="small" :disabled="isScanning" @click="handleInvertSelect">反选</el-button>
         
         <div class="spacer"></div>
         
-        <el-button type="primary" :loading="isScanning" :disabled="isScanning" @click="startScan">
+        <el-button type="primary" :loading="isScanning" :disabled="isScanning || !hasSelectedOptions" @click="startScan">
           {{ isScanning ? '扫描中...' : '开始扫描' }}
         </el-button>
       </div>
       
       <!-- 具体的复选框列表 -->
       <div class="checkboxes">
-        <el-checkbox v-model="options.lastUpdated">下载失败标记 (.lastUpdated)</el-checkbox>
-        <el-checkbox v-model="options.remote">来源记录 (_remote.repositories)</el-checkbox>
-        <el-checkbox v-model="options.inProgress">中断残留 (*.in-progress)</el-checkbox>
-        <el-checkbox v-model="options.zeroByte">零字节文件 (0B Jar/Pom)</el-checkbox>
-        <el-checkbox v-model="options.emptyDir">空文件夹</el-checkbox>
-        <el-checkbox v-model="options.missingJar">POM 声明为 JAR 但缺少 JAR</el-checkbox>
+        <el-checkbox v-model="options.lastUpdated" :disabled="isScanning">下载失败标记 (.lastUpdated)</el-checkbox>
+        <el-checkbox v-model="options.remote" :disabled="isScanning">来源记录 (_remote.repositories)</el-checkbox>
+        <el-checkbox v-model="options.inProgress" :disabled="isScanning">中断残留 (*.in-progress)</el-checkbox>
+        <el-checkbox v-model="options.zeroByte" :disabled="isScanning">零字节文件 (0B Jar/Pom)</el-checkbox>
+        <el-checkbox v-model="options.emptyDir" :disabled="isScanning">空文件夹</el-checkbox>
+        <el-checkbox v-model="options.missingJar" :disabled="isScanning">POM 声明为 JAR 但缺少 JAR</el-checkbox>
       </div>
     </div>
 
+    <div v-if="scanFinished" class="category-filters" aria-label="按扫描类型筛选">
+      <button
+        type="button"
+        class="category-filter"
+        :class="{ active: activeCategory === 'all' }"
+        @click="selectCategory('all')"
+      >
+        全部 <span class="category-count">{{ results.length }}</span>
+      </button>
+      <button
+        v-for="category in categoryCounts"
+        :key="category.key"
+        type="button"
+        class="category-filter"
+        :class="{ active: activeCategory === category.key }"
+        @click="selectCategory(category.key)"
+      >
+        {{ category.label }} <span class="category-count">{{ category.count }}</span>
+      </button>
+    </div>
+
     <!-- 扫描进度与结果操作区保持同一位置 -->
-    <div class="action-bar" v-if="isScanning || (scanFinished && results.length > 0)">
+    <div class="action-bar" v-if="isScanning || (scanFinished && filteredResults.length > 0)">
       <div v-if="isScanning" class="info scan-info" role="status">
         <el-icon class="is-loading"><Loading /></el-icon>
         <span v-if="scanPhase === 'counting'">
@@ -380,18 +436,11 @@ const handleDelete = async () => {
       </div>
       <template v-else>
         <div class="info">
-          共发现 <strong>{{ results.length }}</strong> 项垃圾。
+          当前类型发现 <strong>{{ filteredResults.length }}</strong> 项。
           已选 <strong>{{ selectedRows.length }}</strong> 项，
           预计释放 <strong>{{ formatSize(totalSelectedSize) }}</strong>
         </div>
         <div class="delete-actions">
-          <el-button
-            size="small"
-            :disabled="selectableResults.length === 0"
-            @click="toggleSelectAllResults"
-          >
-            {{ isAllResultsSelected ? '取消全选' : '全选' }}
-          </el-button>
           <el-checkbox v-model="moveToTrash">移入回收站</el-checkbox>
           <el-button type="danger" :loading="isDeleting" :disabled="selectedRows.length === 0" @click="handleDelete">
             {{ moveToTrash ? '移入回收站' : '直接删除' }}
@@ -401,10 +450,10 @@ const handleDelete = async () => {
     </div>
 
     <!-- 结果表格 -->
-    <div v-if="results.length > 0" class="table-wrapper">
+    <div v-if="filteredResults.length > 0" class="table-wrapper">
       <el-table 
         ref="resultsTableRef"
-        :data="results" 
+        :data="filteredResults"
         row-key="id"
         width="100%"
         height="100%" 
@@ -438,7 +487,7 @@ const handleDelete = async () => {
         <el-table-column prop="category" label="分类" width="150">
           <template #default="scope">
             <el-tag size="small" type="warning">
-              {{ scope.row.category === 'missingJar' ? '缺失 JAR' : scope.row.category }}
+              {{ categoryLabel(scope.row.category) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -466,15 +515,15 @@ const handleDelete = async () => {
               />
             </el-tooltip>
             <el-tooltip
-              v-if="scope.row.category === 'missingJar' || scope.row.category === 'lastUpdated'"
+              v-if="(scope.row.category === 'missingJar' || scope.row.category === 'lastUpdated')
+                && repairingItemId !== scope.row.id"
               :content="scope.row.category === 'missingJar' ? '修复 JAR' : '重新下载'"
               placement="top"
             >
               <el-button
                 link
                 type="primary"
-                :loading="repairingItemId === scope.row.id"
-                :disabled="isDeleting || (!!repairingItemId && repairingItemId !== scope.row.id)"
+                :disabled="isDeleting || !!repairingItemId"
                 :aria-label="scope.row.category === 'missingJar' ? '修复 JAR' : '重新下载'"
                 @click="repairArtifact(scope.row)"
               >
@@ -488,13 +537,26 @@ const handleDelete = async () => {
                 </el-icon>
               </el-button>
             </el-tooltip>
+            <el-icon
+              v-else-if="repairingItemId === scope.row.id"
+              class="is-loading"
+              aria-label="正在修复"
+              role="status"
+            >
+              <Loading />
+            </el-icon>
           </template>
         </el-table-column>
       </el-table>
     </div>
     
-    <div v-if="!isScanning && results.length === 0" class="empty-tip">
-      <el-empty description="暂无扫描结果，请点击右上角开始扫描" :image-size="60" />
+    <div v-if="!isScanning && filteredResults.length === 0" class="empty-tip">
+      <el-empty
+        :description="scanFinished
+          ? (activeCategory === 'all' ? '所选扫描类型均未发现问题' : '该类型暂无扫描结果')
+          : '暂无扫描结果，请点击右上角开始扫描'"
+        :image-size="60"
+      />
     </div>
   </div>
 </template>
@@ -570,6 +632,52 @@ const handleDelete = async () => {
 .checkboxes :deep(.el-checkbox) {
   height: 24px;
   margin-right: 0;
+}
+
+.category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.category-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--el-text-color-regular);
+  font: inherit;
+  cursor: pointer;
+}
+
+.category-filter:hover {
+  border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+}
+
+.category-filter.active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.category-count {
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: #f0f2f5;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+}
+
+.category-filter.active .category-count {
+  background: #fff;
+  color: var(--el-color-primary);
 }
 
 .scan-info,

@@ -46,54 +46,48 @@ const scannedLabel = (repoId: string) => {
         <h1>仓库概览</h1>
         <p class="subtitle">查看本地依赖仓库状态，快速扫描或清理缓存。</p>
       </div>
-      <el-button type="primary" :icon="Refresh" :loading="isScanning" @click="emit('scan')">
-        {{ overview ? '重新扫描' : '扫描仓库' }}
-      </el-button>
     </header>
 
-    <div v-if="overview" class="stats-grid">
-      <article class="stat-card">
-        <div class="stat-label"><el-icon><Folder /></el-icon> Group 数量</div>
-        <strong>{{ overview.totalGroups.toLocaleString() }}</strong>
-      </article>
-      <article class="stat-card">
-        <div class="stat-label"><el-icon><Collection /></el-icon> 包数量</div>
-        <strong>{{ overview.totalPackages.toLocaleString() }}</strong>
-      </article>
-      <article class="stat-card">
-        <div class="stat-label"><el-icon><Collection /></el-icon> 包版本总数</div>
-        <strong>{{ overview.totalVersions.toLocaleString() }}</strong>
-      </article>
-      <article class="stat-card">
-        <div class="stat-label"><el-icon><Folder /></el-icon> 文件总数</div>
-        <strong>{{ overview.totalFiles.toLocaleString() }}</strong>
-      </article>
-    </div>
-
-    <div v-else class="welcome-card">
-      <div class="welcome-icon"><el-icon><Folder /></el-icon></div>
-      <div>
-        <h2>{{ activeRepository ? '仓库尚未扫描' : '还没有配置仓库' }}</h2>
-        <p>
-          {{ activeRepository
-            ? '扫描仓库后，这里会显示 Group、包、版本及文件统计。'
-            : '先添加一个本地 Maven 仓库，然后开始扫描。' }}
-        </p>
-      </div>
-      <el-button
-        v-if="activeRepository"
-        type="primary"
-        :loading="isScanning"
-        @click="emit('scan')"
-      >
-        开始扫描
-      </el-button>
-      <el-button v-else type="primary" @click="emit('open-repo-manager')">
-        添加仓库
-      </el-button>
-    </div>
-
     <div class="dashboard-columns">
+      <section class="dashboard-card current-repository-card">
+        <div class="card-heading">
+          <div>
+            <h2>当前仓库</h2>
+            <span>{{ activeRepository?.name || '未选择' }}</span>
+          </div>
+        </div>
+
+        <div v-if="activeRepository" class="current-repository">
+          <div class="path-block">
+            <span class="detail-label">仓库位置</span>
+            <span class="detail-value" :title="activeRepository.path">{{ activeRepository.path }}</span>
+          </div>
+          <div class="cleanup-time">
+            <el-icon><Timer /></el-icon>
+            <span>上次垃圾清理</span>
+            <strong>{{ formatDate(activeRepositoryInfo.lastCleanupAt) }}</strong>
+          </div>
+          <div class="repository-actions">
+            <el-button :icon="Collection" @click="emit('open-cleanup')">
+              打开垃圾清理
+            </el-button>
+            <el-button
+              v-if="!overview"
+              type="primary"
+              :loading="isScanning"
+              @click="emit('scan')"
+            >
+              开始扫描
+            </el-button>
+          </div>
+        </div>
+        <div v-else class="repository-empty">
+          <el-empty description="请先添加并选择仓库" :image-size="64">
+            <el-button type="primary" @click="emit('open-repo-manager')">添加仓库</el-button>
+          </el-empty>
+        </div>
+      </section>
+
       <section class="dashboard-card repositories-card">
         <div class="card-heading">
           <div>
@@ -124,32 +118,51 @@ const scannedLabel = (repoId: string) => {
         </div>
         <el-empty v-else description="暂无仓库" :image-size="64" />
       </section>
-
-      <section class="dashboard-card">
-        <div class="card-heading">
-          <div>
-            <h2>当前仓库</h2>
-            <span>{{ activeRepository?.name || '未选择' }}</span>
-          </div>
-        </div>
-
-        <div v-if="activeRepository" class="current-repository">
-          <div class="path-block">
-            <span class="detail-label">仓库位置</span>
-            <span class="detail-value" :title="activeRepository.path">{{ activeRepository.path }}</span>
-          </div>
-          <div class="cleanup-time">
-            <el-icon><Timer /></el-icon>
-            <span>上次垃圾清理</span>
-            <strong>{{ formatDate(activeRepositoryInfo.lastCleanupAt) }}</strong>
-          </div>
-          <el-button class="cleanup-button" :icon="Collection" @click="emit('open-cleanup')">
-            打开垃圾清理
-          </el-button>
-        </div>
-        <el-empty v-else description="请先添加并选择仓库" :image-size="64" />
-      </section>
     </div>
+
+    <section class="statistics-section">
+      <div class="statistics-heading">
+        <div>
+          <h2>仓库数据</h2>
+          <span>{{ activeRepository?.name || '未选择仓库' }}</span>
+        </div>
+        <el-button
+          v-if="overview"
+          type="primary"
+          :icon="Refresh"
+          :loading="isScanning"
+          @click="emit('scan')"
+        >
+          重新扫描
+        </el-button>
+      </div>
+      <div v-if="overview" class="stats-grid">
+        <article class="stat-card">
+          <div class="stat-label"><el-icon><Folder /></el-icon> Group 数量</div>
+          <strong>{{ overview.totalGroups.toLocaleString() }}</strong>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label"><el-icon><Collection /></el-icon> 包数量</div>
+          <strong>{{ overview.totalPackages.toLocaleString() }}</strong>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label"><el-icon><Collection /></el-icon> 包版本总数</div>
+          <strong>{{ overview.totalVersions.toLocaleString() }}</strong>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label"><el-icon><Folder /></el-icon> 文件总数</div>
+          <strong>{{ overview.totalFiles.toLocaleString() }}</strong>
+        </article>
+      </div>
+      <div v-else class="statistics-empty">
+        <el-empty
+          :description="activeRepository
+            ? '该仓库尚无扫描数据，可通过上方“开始扫描”加载仓库内容。'
+            : '添加并选择仓库后，这里会显示仓库统计。'"
+          :image-size="56"
+        />
+      </div>
+    </section>
   </section>
 </template>
 
@@ -173,7 +186,7 @@ const scannedLabel = (repoId: string) => {
   gap: 16px;
 }
 
-.dashboard-heading { margin-bottom: 24px; }
+.dashboard-heading { margin-bottom: 20px; }
 .eyebrow { margin: 0 0 6px; color: #909399; font-size: 11px; letter-spacing: 0.1em; }
 h1 { margin: 0; font-size: 23px; font-weight: 600; }
 .subtitle { margin: 8px 0 0; color: #909399; }
@@ -182,12 +195,11 @@ h1 { margin: 0; font-size: 23px; font-weight: 600; }
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 20px;
 }
 
 .stat-card,
 .dashboard-card,
-.welcome-card {
+.statistics-section {
   background: #fff;
   border: 1px solid #e4e7ed;
   border-radius: 8px;
@@ -197,36 +209,13 @@ h1 { margin: 0; font-size: 23px; font-weight: 600; }
 .stat-label { display: flex; align-items: center; gap: 7px; color: #909399; }
 .stat-card strong { display: block; margin-top: 12px; font-size: 24px; font-weight: 600; }
 
-.welcome-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  margin-bottom: 20px;
-  background: #f8fafc;
-}
-
-.welcome-icon {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  place-items: center;
-  color: var(--el-color-primary);
-  background: #ecf5ff;
-  border-radius: 8px;
-  font-size: 20px;
-}
-.welcome-card h2 { margin: 0 0 6px; font-size: 15px; }
-.welcome-card p { margin: 0; color: #909399; }
-.welcome-card > :last-child { margin-left: auto; }
-
-.dashboard-columns { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr); gap: 16px; }
+.dashboard-columns { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr); gap: 16px; }
 .dashboard-card { min-width: 0; padding: 18px; }
 .card-heading { padding-bottom: 14px; border-bottom: 1px solid #ebeef5; }
 .card-heading h2 { margin: 0 0 5px; font-size: 15px; font-weight: 600; }
 .card-heading span { color: #909399; font-size: 12px; }
 
-.repository-list { display: flex; flex-direction: column; }
+.repository-list { display: flex; flex-direction: column; max-height: 250px; overflow: auto; }
 .repository-item {
   display: flex;
   align-items: center;
@@ -257,7 +246,14 @@ h1 { margin: 0; font-size: 23px; font-weight: 600; }
 .detail-value { overflow-wrap: anywhere; line-height: 1.5; }
 .cleanup-time { display: flex; align-items: center; gap: 8px; color: #909399; }
 .cleanup-time strong { margin-left: auto; color: #606266; font-weight: 400; text-align: right; }
-.cleanup-button { align-self: flex-start; }
+.repository-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.repository-empty { display: grid; min-height: 190px; place-items: center; }
+
+.statistics-section { margin-top: 16px; padding: 18px; }
+.statistics-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.statistics-heading h2 { margin: 0 0 5px; font-size: 15px; font-weight: 600; }
+.statistics-heading span { color: #909399; font-size: 12px; }
+.statistics-empty { display: grid; min-height: 120px; place-items: center; }
 
 @media (max-width: 900px) {
   .dashboard { padding: 24px; }
@@ -269,7 +265,6 @@ h1 { margin: 0; font-size: 23px; font-weight: 600; }
   .dashboard { padding: 18px; }
   .dashboard-heading { align-items: flex-start; }
   .repository-meta { display: none; }
-  .welcome-card { align-items: flex-start; flex-wrap: wrap; }
-  .welcome-card > :last-child { margin-left: 58px; }
+  .cleanup-time { flex-wrap: wrap; }
 }
 </style>
