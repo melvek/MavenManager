@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: # 👈 关键：允许在 Actions 页面手动点击运行
+  workflow_dispatch:
 
 env:
   NODE_OPTIONS: "--max-old-space-size=4096"
@@ -16,16 +16,16 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            platform: windows/amd64
-            output: mvnmanager.exe
+            goos: windows
+            goarch: amd64
             archive: mvnmanager-windows-amd64.zip
           - os: macos-latest
-            platform: darwin/universal
-            output: mvnmanager.app
+            goos: darwin
+            goarch: universal
             archive: mvnmanager-darwin-universal.zip
           - os: ubuntu-latest
-            platform: linux/amd64
-            output: mvnmanager
+            goos: linux
+            goarch: amd64
             archive: mvnmanager-linux-amd64.tar.gz
 
     runs-on: ${{ matrix.os }}
@@ -60,24 +60,31 @@ jobs:
           cd frontend
           npm install
 
-      - name: Build
-        run: wails3 build -platform ${{ matrix.platform }} -o ${{ matrix.output }}
+      - name: Build (Windows / Linux)
+        if: matrix.goos != 'darwin'
+        run: wails3 build GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}
+        shell: bash
+
+      - name: Build (macOS Universal)
+        if: matrix.goos == 'darwin'
+        run: wails3 task darwin:build:universal
+        shell: bash
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
-        run: Compress-Archive -Path bin/${{ matrix.output }} -DestinationPath ${{ matrix.archive }}
+        run: Compress-Archive -Path bin/* -DestinationPath ${{ matrix.archive }}
 
       - name: Package (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           cd bin
-          zip -r ../${{ matrix.archive }} ${{ matrix.output }}
+          zip -r ../${{ matrix.archive }} *
 
       - name: Package (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           cd bin
-          tar -czvf ../${{ matrix.archive }} ${{ matrix.output }}
+          tar -czvf ../${{ matrix.archive }} *
 
       - name: Upload to Draft Release
         uses: softprops/action-gh-release@v2
