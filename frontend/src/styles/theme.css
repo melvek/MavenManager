@@ -1,0 +1,16 @@
+:root {
+  --app-background: #f3f4f6;
+  --app-surface: #ffffff;
+  --app-text: #333333;
+  --app-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --app-font-size: 12px;
+
+  --el-color-primary: #409eff;
+  --el-border-color: #e4e7ed;
+  --el-border-color-light: #ebeef5;
+  --el-font-size-base: 12px;
+  --el-font-size-small: 12px;
+  --el-font-size-extra-small: 12px;
+  --el-font-size-medium: 14px;
+  --el-font-size-large: 16px;
+}

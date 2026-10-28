@@ -1,0 +1,31 @@
+.el-input__wrapper {
+  background-color: var(--app-surface);
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-input__inner {
+  color: #303133;
+  -webkit-text-fill-color: currentColor;
+}
+
+.el-input__inner::placeholder {
+  color: #909399;
+}
+
+.el-input__prefix-inner {
+  color: #606266;
+}
+
+.el-overlay,
+.el-message-box {
+  --wails-draggable: no-drag;
+}
+
+.el-table td.el-table__cell,
+.el-table th.el-table__cell {
+  line-height: 1.4;
+}

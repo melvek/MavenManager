@@ -20,6 +20,16 @@ profile.cov
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+/frontend/node_modules/
+
+# Build output and local runtime data
+/bin/
+/frontend/dist/
+/.task/
+/config.json
+/repository-info.json
+/bin/config.json
+/bin/repository-info.json
 
 # Go workspace file
 go.work
@@ -29,5 +39,11 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# OS and editor-generated files
+.DS_Store
+Thumbs.db
+*.log
+*~

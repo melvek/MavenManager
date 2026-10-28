@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A mvnmanager application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/mvnmanager.exe %u
+Terminal=false
+Type=Application
+Icon=mvnmanager.exe
+Categories=Utility;
+StartupWMClass=mvnmanager.exe
+
+ 
