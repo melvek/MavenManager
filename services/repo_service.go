@@ -682,7 +682,49 @@ func (s *RepoService) RepairArtifact(repoPath, groupID, artifactID, version, mav
 		}
 		return fmt.Errorf("Maven dependency repair failed: %w\n%s", err, details)
 	}
+	s.refreshArtifactVersion(repoPath, groupID, artifactID, version)
 	return nil
+}
+
+func (s *RepoService) refreshArtifactVersion(repoPath, groupID, artifactID, version string) {
+	groupPath := filepath.Join(strings.Split(groupID, ".")...)
+	versionDir := filepath.Join(repoPath, groupPath, artifactID, version)
+	entries, err := os.ReadDir(versionDir)
+	if err != nil {
+		log.Printf("无法刷新依赖版本缓存: %s, 错误: %v", versionDir, err)
+		return
+	}
+
+	files := make([]catalog.VersionDetail, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".jar") || strings.HasSuffix(entry.Name(), ".pom")) {
+			continue
+		}
+		path := filepath.Join(versionDir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			log.Printf("无法读取依赖文件信息: %s, 错误: %v", path, err)
+			continue
+		}
+		files = append(files, catalog.VersionDetail{
+			Version: version, FileName: entry.Name(), Size: info.Size(),
+			ModTime: info.ModTime(), Path: path,
+		})
+	}
+
+	key := fmt.Sprintf("%s:%s", groupID, artifactID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.versions == nil {
+		s.versions = make(map[string][]catalog.VersionDetail)
+	}
+	versions := s.versions[key][:0]
+	for _, file := range s.versions[key] {
+		if file.Version != version {
+			versions = append(versions, file)
+		}
+	}
+	s.versions[key] = append(versions, files...)
 }
 
 func resolveMavenInstallation(mavenPath string) (string, string, error) {

@@ -3,7 +3,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import { RepoService, ConfigService } from '../bindings/mvnmanager/services'
 import { Events } from '@wailsio/runtime'
 import { ElMessage } from 'element-plus'
-import type { TabItem, VersionGroup, AppConfig, RepositoryInfo, RepositoryOverview } from './types'
+import type { ArtifactCoordinate, TabItem, VersionGroup, AppConfig, RepositoryInfo, RepositoryOverview } from './types'
 
 import TopBar from './components/TopBar.vue'
 import ScanDialog from './components/ScanDialog.vue'
@@ -42,6 +42,7 @@ const showScanDialog = ref(false)
 
 const openedTabs = ref<TabItem[]>([])
 const activeTab = ref<string>('')
+const exportItems = ref<ArtifactCoordinate[]>([])
 const tabDataMap = ref<Record<string, VersionGroup[]>>({})
 const selectedVersionMap = ref<Record<string, VersionGroup>>({})
 const mainContentRef = ref<InstanceType<typeof MainContent> | null>(null)
@@ -150,6 +151,35 @@ const handleDoubleClick = (data: any) => openArtifactTab(data, true);
 const handleCleanupOpenArtifact = (data: { groupId: string; artifactId: string; version: string }) =>
   openArtifactTab(data, true)
 
+const handleAddExportArtifact = (artifact: ArtifactCoordinate) => {
+  const exists = exportItems.value.some(item =>
+    item.groupId === artifact.groupId &&
+    item.artifactId === artifact.artifactId &&
+    item.version === artifact.version
+  )
+  if (!exists) exportItems.value.push({ ...artifact })
+
+  const tabId = 'export-tool'
+  if (!openedTabs.value.some(tab => tab.id === tabId)) {
+    openedTabs.value.push({ id: tabId, title: '导出列表', type: 'export' })
+  }
+  activeTab.value = tabId
+  if (exists) ElMessage.info('该依赖版本已在导出列表中')
+  else ElMessage.success(`已添加 ${artifact.artifactId}-${artifact.version}`)
+}
+
+const handleRemoveExportArtifact = (artifact: ArtifactCoordinate) => {
+  exportItems.value = exportItems.value.filter(item =>
+    !(item.groupId === artifact.groupId &&
+      item.artifactId === artifact.artifactId &&
+      item.version === artifact.version)
+  )
+}
+
+const clearExportList = () => {
+  exportItems.value = []
+}
+
 
 // ================= 系统与仓库管理 =================
 const handleSwitchRepo = async (repoId: string) => {
@@ -168,6 +198,7 @@ const handleSwitchRepo = async (repoId: string) => {
   }
   
   openedTabs.value = openedTabs.value.filter(t => t.type === 'cleanup')
+  exportItems.value = []
   if (openedTabs.value.length > 0) activeTab.value = openedTabs.value[0].id
   else activeTab.value = ''
   
@@ -259,9 +290,10 @@ const handleSaveSettings = async (newConfig: AppConfig) => {
   appConfig.value = newConfig
 }
 
-const loadTabData = async (tabId: string, groupId: string, artifactId: string) => {
+const loadTabData = async (tabId: string, groupId: string, artifactId: string, forceReload = false) => {
   let versionGroups = tabDataMap.value[tabId]
-  if (!versionGroups) {
+  const selectedVersion = selectedVersionMap.value[tabId]?.version
+  if (!versionGroups || forceReload) {
     const res = (await RepoService.GetArtifactVersions(groupId, artifactId)) || []
     
     const groups: Record<string, any[]> = {}
@@ -285,6 +317,12 @@ const loadTabData = async (tabId: string, groupId: string, artifactId: string) =
 
     versionGroups.sort((a, b) => b.version.localeCompare(a.version))
     tabDataMap.value[tabId] = versionGroups
+    const refreshedSelectedVersion = versionGroups.find(item => item.version === selectedVersion)
+    if (refreshedSelectedVersion) {
+      selectedVersionMap.value[tabId] = refreshedSelectedVersion
+      await nextTick()
+      mainContentRef.value?.setCurrentRow(tabId, refreshedSelectedVersion)
+    }
   }
 
   if (!selectedVersionMap.value[tabId] && versionGroups.length > 0) {
@@ -292,6 +330,32 @@ const loadTabData = async (tabId: string, groupId: string, artifactId: string) =
     selectedVersionMap.value[tabId] = firstVersion
     await nextTick()
     mainContentRef.value?.setCurrentRow(tabId, firstVersion)
+  }
+}
+
+const handleArtifactRefresh = async (data: {
+  tabId: string
+  groupId: string
+  artifactId: string
+}) => {
+  await loadTabData(data.tabId, data.groupId, data.artifactId, true)
+}
+
+const handleArtifactVersionDeleted = async (data: { tabId: string; version: string }) => {
+  const selectedVersion = selectedVersionMap.value[data.tabId]?.version
+  const remainingVersions = (tabDataMap.value[data.tabId] ?? []).filter(
+    item => item.version !== data.version
+  )
+  tabDataMap.value[data.tabId] = remainingVersions
+  const nextSelection = remainingVersions.find(item => item.version === selectedVersion) ??
+    (selectedVersion === data.version ? remainingVersions[0] : undefined)
+  if (nextSelection) {
+    selectedVersionMap.value[data.tabId] = nextSelection
+    await nextTick()
+    mainContentRef.value?.setCurrentRow(data.tabId, nextSelection)
+  } else {
+    delete selectedVersionMap.value[data.tabId]
+    mainContentRef.value?.clearHighlight(data.tabId)
   }
 }
 
@@ -384,6 +448,7 @@ const handleTabChange = (tabId: string) => {
         ref="mainContentRef"
         v-model:activeTab="activeTab"
         :openedTabs="openedTabs"
+        :exportItems="exportItems"
         :tabDataMap="tabDataMap"
         :selectedVersionMap="selectedVersionMap"
         :repoPath="currentRepoPath"
@@ -400,6 +465,11 @@ const handleTabChange = (tabId: string) => {
         @close-detail="handleCloseDetail"
         @cleanup-done="handleCleanupDone"
         @cleanup-open-artifact="handleCleanupOpenArtifact"
+        @artifact-refresh="handleArtifactRefresh"
+        @artifact-version-deleted="handleArtifactVersionDeleted"
+        @add-export-artifact="handleAddExportArtifact"
+        @remove-export-artifact="handleRemoveExportArtifact"
+        @clear-export-list="clearExportList"
         @select-repository="handleSwitchRepo"
         @scan="startScan"
         @open-cleanup="openCleanupPanel"

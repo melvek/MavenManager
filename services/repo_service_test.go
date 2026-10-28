@@ -316,6 +316,53 @@ func TestBuildMavenRepairArgumentsUseLocalRepositoryAndExtraRemotes(t *testing.T
 	}
 }
 
+func TestRefreshArtifactVersionUpdatesCachedFiles(t *testing.T) {
+	repoPath := t.TempDir()
+	versionDir := filepath.Join(repoPath, "com", "example", "library", "1.0")
+	if err := os.MkdirAll(versionDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pomPath := filepath.Join(versionDir, "library-1.0.pom")
+	jarPath := filepath.Join(versionDir, "library-1.0.jar")
+	if err := os.WriteFile(pomPath, []byte("<project/>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(jarPath, []byte("jar-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	service := &RepoService{
+		versions: map[string][]catalog.VersionDetail{
+			"com.example:library": {
+				{Version: "1.0", FileName: "library-1.0.pom"},
+				{Version: "2.0", FileName: "library-2.0.pom"},
+			},
+		},
+	}
+	service.refreshArtifactVersion(repoPath, "com.example", "library", "1.0")
+
+	got := service.GetArtifactVersions("com.example", "library")
+	if len(got) != 3 {
+		t.Fatalf("cached artifact files = %d, want 3", len(got))
+	}
+	foundJar := false
+	foundOtherVersion := false
+	for _, file := range got {
+		if file.Version == "1.0" && file.FileName == "library-1.0.jar" && file.Size == int64(len("jar-data")) {
+			foundJar = true
+		}
+		if file.Version == "2.0" {
+			foundOtherVersion = true
+		}
+	}
+	if !foundJar {
+		t.Error("refreshed cache does not include repaired JAR file")
+	}
+	if !foundOtherVersion {
+		t.Error("refresh removed files belonging to another version")
+	}
+}
+
 func TestResolveMavenInstallationUsesConfSettings(t *testing.T) {
 	mavenHome := t.TempDir()
 	executableName := "mvn"

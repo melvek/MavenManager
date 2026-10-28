@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Close, Grid, DocumentCopy, CopyDocument, Delete } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Close, Download, Grid, DocumentCopy, CopyDocument, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { RepoService } from '../../bindings/mvnmanager/services'
 import CleanupPanel from './CleanupPanel.vue'
 import Dashboard from './Dashboard.vue'
-import type { RemoteRepository, Repository, RepositoryInfo, RepositoryOverview, TabItem, VersionGroup } from '../types'
+import ExportPanel from './ExportPanel.vue'
+import type { ArtifactCoordinate, RemoteRepository, Repository, RepositoryInfo, RepositoryOverview, TabItem, VersionGroup } from '../types'
 
 const props = defineProps<{
   openedTabs: TabItem[]
   activeTab: string
+  exportItems: ArtifactCoordinate[]
   tabDataMap: Record<string, VersionGroup[]>
   selectedVersionMap: Record<string, VersionGroup>
   repoPath: string
@@ -24,12 +27,91 @@ const props = defineProps<{
 const emit = defineEmits([
   'update:activeTab', 'tab-change', 'tab-remove', 
   'row-click', 'close-detail', 'cleanup-done', 'cleanup-open-artifact',
-  'select-repository', 'scan', 'open-cleanup', 'open-repo-manager'
+  'select-repository', 'scan', 'open-cleanup', 'open-repo-manager',
+  'artifact-version-deleted', 'artifact-refresh', 'add-export-artifact',
+  'remove-export-artifact', 'clear-export-list'
 ])
 
 const tableRefs = ref<Record<string, any>>({})
+const activeArtifactAction = ref('')
 const setTableRef = (el: any, tabId: string) => {
   if (el) tableRefs.value[tabId] = el
+}
+
+const getArtifactActionKey = (tab: TabItem, version: string, action: string) =>
+  `${tab.id}:${version}:${action}`
+
+const deleteArtifactVersion = async (tab: TabItem, version: string) => {
+  if (!tab.groupId || !tab.artifactId) return
+
+  try {
+    await ElMessageBox.confirm(
+      `将把 ${tab.groupId}:${tab.artifactId}:${version} 的整个版本目录移入回收站。是否继续？`,
+      '删除依赖版本',
+      {
+        type: 'warning',
+        confirmButtonText: '移入回收站',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    return
+  }
+
+  const actionKey = getArtifactActionKey(tab, version, 'delete')
+  activeArtifactAction.value = actionKey
+  try {
+    const result = await RepoService.DeleteArtifactVersion(
+      props.repoPath,
+      tab.groupId,
+      tab.artifactId,
+      version,
+      true
+    )
+    if (Number(result?.count || 0) === 0) {
+      ElMessage.warning('未能删除该依赖版本，请检查文件是否被占用。')
+      return
+    }
+    emit('artifact-version-deleted', {
+      tabId: tab.id,
+      groupId: tab.groupId,
+      artifactId: tab.artifactId,
+      version
+    })
+    ElMessage.success(`已将 ${tab.artifactId}-${version} 移入回收站`)
+  } catch (error) {
+    ElMessage.error(`删除依赖版本失败：${String(error)}`)
+  } finally {
+    activeArtifactAction.value = ''
+  }
+}
+
+const repairArtifactVersion = async (tab: TabItem, version: string) => {
+  if (!tab.groupId || !tab.artifactId) return
+
+  const actionKey = getArtifactActionKey(tab, version, 'repair')
+  activeArtifactAction.value = actionKey
+  try {
+    await RepoService.RepairArtifact(
+      props.repoPath,
+      tab.groupId,
+      tab.artifactId,
+      version,
+      props.mavenPath,
+      props.remoteRepositories
+    )
+    emit('artifact-refresh', {
+      tabId: tab.id,
+      groupId: tab.groupId,
+      artifactId: tab.artifactId,
+      version
+    })
+    ElMessage.success(`已重新下载 ${tab.artifactId}-${version}`)
+  } catch (error) {
+    ElMessage.error(`依赖修复失败：${String(error)}`)
+  } finally {
+    activeArtifactAction.value = ''
+  }
 }
 
 const formatSize = (bytes: number) => {
@@ -130,6 +212,7 @@ defineExpose({
         <template #label>
           <span class="tab-title">
             <el-icon v-if="tab.type === 'cleanup'"><Delete /></el-icon>
+            <el-icon v-else-if="tab.type === 'export'"><Download /></el-icon>
             <el-icon v-else><Grid /></el-icon>
             {{ tab.title }}
           </span>
@@ -143,6 +226,15 @@ defineExpose({
             :remoteRepositories="remoteRepositories"
             @cleanup-done="emit('cleanup-done')"
             @open-artifact="emit('cleanup-open-artifact', $event)"
+          />
+        </div>
+
+        <div v-else-if="tab.type === 'export'" class="tab-content-wrapper">
+          <ExportPanel
+            :repoPath="repoPath"
+            :artifacts="exportItems"
+            @remove="emit('remove-export-artifact', $event)"
+            @clear="emit('clear-export-list')"
           />
         </div>
 
@@ -185,6 +277,53 @@ defineExpose({
                 </el-table-column>
                 <el-table-column prop="latestModTime" label="Last Modified" sortable>
                   <template #default="scope">{{ new Date(scope.row.latestModTime).toLocaleString() }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="220" fixed="right" align="center">
+                  <template #default="scope">
+                    <el-tooltip content="加入导出列表" placement="top">
+                      <el-button
+                        link
+                        type="primary"
+                        :icon="Download"
+                        aria-label="加入导出列表"
+                        @click="emit('add-export-artifact', {
+                          groupId: tab.groupId,
+                          artifactId: tab.artifactId,
+                          version: scope.row.version
+                        })"
+                      />
+                    </el-tooltip>
+                    <el-tooltip content="重新下载" placement="top">
+                      <el-button
+                        link
+                        type="primary"
+                        :loading="activeArtifactAction === getArtifactActionKey(tab, scope.row.version, 'repair')"
+                        :disabled="!!activeArtifactAction"
+                        aria-label="重新下载"
+                        @click="repairArtifactVersion(tab, scope.row.version)"
+                      >
+                        <el-icon class="wrench-icon">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              fill="currentColor"
+                              d="M22.7 19 13.6 9.9a6.5 6.5 0 0 0-8.5-8.2l4.8 4.8-3.2 3.2-4.8-4.8a6.5 6.5 0 0 0 8.2 8.5l9.1 9.1a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4Z"
+                            />
+                          </svg>
+                        </el-icon>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="删除版本" placement="top">
+                      <el-button
+                        link
+                        type="danger"
+                        :icon="Delete"
+                        :loading="activeArtifactAction === getArtifactActionKey(tab, scope.row.version, 'delete')"
+                        :disabled="!!activeArtifactAction"
+                        aria-label="删除版本"
+                        @click="deleteArtifactVersion(tab, scope.row.version)"
+                      />
+                    </el-tooltip>
+                  </template>
                 </el-table-column>
               </el-table>
             </div>
@@ -275,11 +414,12 @@ defineExpose({
 :deep(.el-icon.is-icon-close:hover) { background-color: #f56c6c; color: #fff; border-radius: 50%; }
 
 .tab-content-wrapper { flex: 1; display: flex; flex-direction: column; height: 100%; }
-.toolbar { padding: 8px 16px; background: #fff; border-bottom: 1px solid #ebeef5; display: flex; align-items: center; flex-shrink: 0; }
+.toolbar { padding: 8px 16px; background: #fff; border-bottom: 1px solid #ebeef5; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
 .breadcrumb { font-size: 13px; color: #606266; }
 .breadcrumb .group-id { color: #909399; }
 .breadcrumb .separator { margin: 0 6px; color: #c0c4cc; }
 .breadcrumb .artifact-id { color: #303133; font-weight: 600; }
+.wrench-icon svg { width: 1em; height: 1em; }
 
 .split-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; padding: 0; }
 

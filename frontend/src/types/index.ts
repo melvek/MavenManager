@@ -32,9 +32,15 @@ export interface RepositoryOverview {
 export interface TabItem {
   id: string
   title: string
-  type: 'artifact' | 'cleanup'
+  type: 'artifact' | 'cleanup' | 'export'
   groupId?: string
   artifactId?: string
+}
+
+export interface ArtifactCoordinate {
+  groupId: string
+  artifactId: string
+  version: string
 }
 
 export interface FileDetail {

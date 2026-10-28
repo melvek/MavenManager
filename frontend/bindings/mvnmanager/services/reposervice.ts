@@ -24,6 +24,10 @@ export function DeleteFiles(repoPath: string, paths: string[] | null, moveToTras
     return $Call.ByID(1525352437, repoPath, paths, moveToTrash);
 }
 
+export function ExportArtifactVersions(repoPath: string, artifacts: catalog$0.ArtifactCoordinate[] | null, scriptType: string): $CancellablePromise<string> {
+    return $Call.ByID(2127692300, repoPath, artifacts, scriptType);
+}
+
 export function GetArtifactVersions(groupId: string, artifactId: string): $CancellablePromise<catalog$0.VersionDetail[] | null> {
     return $Call.ByID(1214864488, groupId, artifactId);
 }

@@ -19,6 +19,12 @@ type RepositoryOverview struct {
 	TotalVersions int   `json:"totalVersions"`
 }
 
+type ArtifactCoordinate struct {
+	GroupID    string `json:"groupId"`
+	ArtifactID string `json:"artifactId"`
+	Version    string `json:"version"`
+}
+
 // 右侧版本详情
 type VersionDetail struct {
 	Version  string    `json:"version"`
