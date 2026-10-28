@@ -1,3 +1,8 @@
+[![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://go.dev)
+[![Version](https://img.shields.io/github/v/release/melvek/MavenManager?include_prereleases)](https://github.com/melvek/MavenManager/releases/latest)
+![Supports](https://img.shields.io/badge/Supports-Windows,%20Linux,%20macOS-orange)
+[![License](https://img.shields.io/github/license/melvek/MavenManager)](LICENSE)
+
 # MavenManager
 
 MavenManager 是一个基于 Go、Wails v3 和 Vue 3 的桌面应用，用于浏览和维护本机 Maven 本地仓库。它可以查看依赖及版本、识别常见缓存残留、修复缺失依赖，并按 Maven 仓库结构导出依赖包。
