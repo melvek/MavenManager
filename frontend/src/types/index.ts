@@ -29,10 +29,19 @@ export interface RepositoryOverview {
   totalVersions: number
 }
 
+export interface TreeNode {
+  id: string
+  label: string
+  isLeaf: boolean
+  groupId?: string
+  artifactId?: string
+  children?: TreeNode[]
+}
+
 export interface TabItem {
   id: string
   title: string
-  type: 'artifact' | 'cleanup' | 'export'
+  type: 'dashboard' | 'packages' | 'artifact' | 'cleanup' | 'export'
   groupId?: string
   artifactId?: string
 }
@@ -43,11 +52,16 @@ export interface ArtifactCoordinate {
   version: string
 }
 
+export interface ArtifactVersionSummary extends ArtifactCoordinate {
+  modTime: string
+}
+
 export interface FileDetail {
   fileName: string
   size: number
   modTime: string
   path: string
+  packaging?: string
 }
 
 export interface VersionGroup {
@@ -55,7 +69,10 @@ export interface VersionGroup {
   files: FileDetail[]
   totalSize: number
   latestModTime: string
+  isPom: boolean
   hasJar: boolean
+  hasSource: boolean
+  hasSha1: boolean
   hasPom: boolean
   hasRemote: boolean
   hasLastUpdated: boolean

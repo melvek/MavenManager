@@ -25,13 +25,21 @@ type ArtifactCoordinate struct {
 	Version    string `json:"version"`
 }
 
+type ArtifactVersionSummary struct {
+	GroupID    string    `json:"groupId"`
+	ArtifactID string    `json:"artifactId"`
+	Version    string    `json:"version"`
+	ModTime    time.Time `json:"modTime"`
+}
+
 // 右侧版本详情
 type VersionDetail struct {
-	Version  string    `json:"version"`
-	FileName string    `json:"fileName"`
-	Size     int64     `json:"size"`
-	ModTime  time.Time `json:"modTime"`
-	Path     string    `json:"path"` // 用于删除
+	Version   string    `json:"version"`
+	FileName  string    `json:"fileName"`
+	Size      int64     `json:"size"`
+	ModTime   time.Time `json:"modTime"`
+	Path      string    `json:"path"` // 用于删除
+	Packaging string    `json:"packaging,omitempty"`
 	// 后续扩展：是否有 .lastUpdated，是否被引用等
 }
 

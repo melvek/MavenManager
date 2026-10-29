@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Close, Download, Grid, DocumentCopy, CopyDocument, Delete } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
+import { Close, Download, Grid, DocumentCopy, CopyDocument, Delete, House, Folder, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { RepoService } from '../../bindings/mvnmanager/services'
 import CleanupPanel from './CleanupPanel.vue'
 import Dashboard from './Dashboard.vue'
 import ExportPanel from './ExportPanel.vue'
-import type { ArtifactCoordinate, RemoteRepository, Repository, RepositoryInfo, RepositoryOverview, TabItem, VersionGroup } from '../types'
+import type { ArtifactCoordinate, ArtifactVersionSummary, RemoteRepository, Repository, RepositoryInfo, RepositoryOverview, TabItem, TreeNode, VersionGroup } from '../types'
 
 const props = defineProps<{
   openedTabs: TabItem[]
   activeTab: string
+  treeData: TreeNode[]
+  allArtifactVersions: ArtifactVersionSummary[]
   exportItems: ArtifactCoordinate[]
   tabDataMap: Record<string, VersionGroup[]>
   selectedVersionMap: Record<string, VersionGroup>
@@ -27,15 +29,43 @@ const props = defineProps<{
 const emit = defineEmits([
   'update:activeTab', 'tab-change', 'tab-remove', 
   'row-click', 'close-detail', 'cleanup-done', 'cleanup-open-artifact',
+  'open-package',
   'select-repository', 'scan', 'open-cleanup', 'open-repo-manager',
-  'artifact-version-deleted', 'artifact-refresh', 'add-export-artifact',
+  'artifact-version-deleted', 'artifact-refresh', 'add-export-artifact', 'add-export-artifacts',
   'remove-export-artifact', 'clear-export-list'
 ])
 
 const tableRefs = ref<Record<string, any>>({})
+const packageTableRef = ref<any>(null)
 const activeArtifactAction = ref('')
+const packageSearch = ref('')
+const selectedPackageVersions = ref<ArtifactVersionSummary[]>([])
+const packageRows = computed(() => props.allArtifactVersions)
+const filteredPackageRows = computed(() => {
+  const terms = packageSearch.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  if (!terms.length) return packageRows.value
+  return packageRows.value.filter(row => {
+    const searchableText = `${row.groupId} ${row.artifactId} ${row.version}`.toLocaleLowerCase()
+    return terms.every(term => searchableText.includes(term))
+  })
+})
 const setTableRef = (el: any, tabId: string) => {
   if (el) tableRefs.value[tabId] = el
+}
+
+const handlePackageSelectionChange = (rows: ArtifactVersionSummary[]) => {
+  selectedPackageVersions.value = rows
+}
+
+const addSelectedPackagesToExport = () => {
+  if (!selectedPackageVersions.value.length) return
+  emit('add-export-artifacts', selectedPackageVersions.value.map(({ groupId, artifactId, version }) => ({
+    groupId,
+    artifactId,
+    version
+  })))
+  packageTableRef.value?.clearSelection()
+  selectedPackageVersions.value = []
 }
 
 const getArtifactActionKey = (tab: TabItem, version: string, action: string) =>
@@ -181,22 +211,7 @@ defineExpose({
 
 <template>
   <main class="content">
-    <div v-if="openedTabs.length === 0" class="empty-state">
-      <Dashboard
-        :repositories="repositories"
-        :repositoryInfos="repositoryInfos"
-        :activeRepoId="activeRepoId"
-        :overview="overview"
-        :isScanning="isScanning"
-        @select-repository="emit('select-repository', $event)"
-        @scan="emit('scan')"
-        @open-cleanup="emit('open-cleanup')"
-        @open-repo-manager="emit('open-repo-manager')"
-      />
-    </div>
-
-    <el-tabs 
-      v-else
+    <el-tabs
       :model-value="activeTab" 
       @update:model-value="(val: any) => emit('update:activeTab', val)"
       class="tabs-container" 
@@ -207,19 +222,121 @@ defineExpose({
         v-for="tab in openedTabs" 
         :key="tab.id" 
         :name="tab.id" 
-        :closable="true"
+        :closable="tab.type !== 'dashboard'"
       >
         <template #label>
           <span class="tab-title">
-            <el-icon v-if="tab.type === 'cleanup'"><Delete /></el-icon>
+            <el-icon v-if="tab.type === 'dashboard'"><House /></el-icon>
+            <el-icon v-else-if="tab.type === 'packages'"><Folder /></el-icon>
+            <el-icon v-else-if="tab.type === 'cleanup'"><Delete /></el-icon>
             <el-icon v-else-if="tab.type === 'export'"><Download /></el-icon>
             <el-icon v-else><Grid /></el-icon>
             {{ tab.title }}
           </span>
         </template>
 
+        <div v-if="tab.type === 'dashboard'" class="tab-content-wrapper">
+          <Dashboard
+            :repositories="repositories"
+            :repositoryInfos="repositoryInfos"
+            :activeRepoId="activeRepoId"
+            :overview="overview"
+            :isScanning="isScanning"
+            @select-repository="emit('select-repository', $event)"
+            @scan="emit('scan')"
+            @open-cleanup="emit('open-cleanup')"
+            @open-repo-manager="emit('open-repo-manager')"
+          />
+        </div>
+
+        <div v-else-if="tab.type === 'packages'" class="tab-content-wrapper">
+          <div class="toolbar">
+            <div class="breadcrumb">
+              <strong class="artifact-id">依赖列表</strong>
+              <span class="separator">·</span>
+              <span>
+                {{ filteredPackageRows.length.toLocaleString() }}
+                <template v-if="filteredPackageRows.length !== packageRows.length">
+                  / {{ packageRows.length.toLocaleString() }}
+                </template>
+                个版本
+              </span>
+            </div>
+            <div class="package-list-actions">
+              <el-input
+                v-model="packageSearch"
+                class="package-search"
+                size="small"
+                clearable
+                :prefix-icon="Search"
+                placeholder="搜索 Group、Artifact 或版本"
+              />
+              <el-button
+                type="primary"
+                size="small"
+                :disabled="selectedPackageVersions.length === 0"
+                @click="addSelectedPackagesToExport"
+              >
+                加入导出列表 ({{ selectedPackageVersions.length }})
+              </el-button>
+              <el-button
+                size="small"
+                :loading="isScanning"
+                :disabled="isScanning || !repoPath"
+                @click="emit('scan')"
+              >
+                {{ isScanning ? '扫描中' : '重新扫描' }}
+              </el-button>
+            </div>
+          </div>
+          <el-table
+            v-if="packageRows.length"
+            ref="packageTableRef"
+            :data="filteredPackageRows"
+            height="100%"
+            class="custom-table"
+            :default-sort="{ prop: 'modTime', order: 'descending' }"
+            @selection-change="handlePackageSelectionChange"
+          >
+            <el-table-column type="selection" width="48" />
+            <el-table-column prop="groupId" label="Group ID" min-width="220" sortable />
+            <el-table-column label="Artifact ID" min-width="200" sortable>
+              <template #default="scope">
+                <el-button
+                  link
+                  type="primary"
+                  @click.stop="emit('open-package', {
+                    groupId: scope.row.groupId,
+                    artifactId: scope.row.artifactId
+                  })"
+                >
+                  {{ scope.row.artifactId }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <el-table-column prop="version" label="Version" min-width="140" sortable />
+            <el-table-column
+              prop="modTime"
+              label="Last Modified"
+              min-width="190"
+              sortable
+              :sort-method="(left: ArtifactVersionSummary, right: ArtifactVersionSummary) =>
+                new Date(left.modTime).getTime() - new Date(right.modTime).getTime()"
+            >
+              <template #default="scope">{{ new Date(scope.row.modTime).toLocaleString() }}</template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="packages-empty">
+            <el-empty
+              :description="packageSearch
+                ? '没有找到匹配的依赖版本。'
+                : '仓库中没有可展示的依赖版本。'"
+            />
+          </div>
+        </div>
+
         <!-- 清理面板 -->
-        <div v-if="tab.type === 'cleanup'" class="tab-content-wrapper">
+        <div v-else-if="tab.type === 'cleanup'" class="tab-content-wrapper">
           <CleanupPanel
             :repoPath="repoPath"
             :mavenPath="mavenPath"
@@ -259,17 +376,44 @@ defineExpose({
                 class="custom-table"
               >
                 <el-table-column prop="version" label="Version" sortable width="160" />
-                <el-table-column label="Type" width="120">
+                <el-table-column label="Type" width="220">
                   <template #default="scope">
-                    <el-tag v-if="scope.row.hasJar" size="small" type="primary" effect="plain" style="margin-right: 4px; border:none; background:#ecf5ff;">JAR</el-tag>
-                    <el-tag v-if="scope.row.hasPom" size="small" type="info" effect="plain" style="border:none; background:#f4f4f5;">POM</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="Status" width="150">
-                  <template #default="scope">
-                    <span v-if="scope.row.hasLastUpdated" class="status-badge error">下载失效</span>
-                    <span v-else-if="scope.row.hasRemote" class="status-badge success">Remote</span>
-                    <span v-else class="status-badge normal">本地正常</span>
+                    <el-tag
+                      v-if="!scope.row.isPom"
+                      size="small"
+                      :type="scope.row.hasJar ? 'success' : 'danger'"
+                      effect="plain"
+                      class="type-tag"
+                    >
+                      JAR
+                    </el-tag>
+                    <el-tag
+                      v-if="!scope.row.isPom && scope.row.hasSource"
+                      size="small"
+                      type="success"
+                      effect="plain"
+                      class="type-tag"
+                    >
+                      SOURCE
+                    </el-tag>
+                    <el-tag
+                      v-if="scope.row.hasPom"
+                      size="small"
+                      type="info"
+                      effect="plain"
+                      class="type-tag"
+                    >
+                      POM
+                    </el-tag>
+                    <el-tag
+                      v-if="scope.row.hasSha1"
+                      size="small"
+                      type="primary"
+                      effect="plain"
+                      class="type-tag"
+                    >
+                      SHA1
+                    </el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column label="Size" width="100" sortable :sort-method="(a:any, b:any) => a.totalSize - b.totalSize">
@@ -414,12 +558,16 @@ defineExpose({
 :deep(.el-icon.is-icon-close:hover) { background-color: #f56c6c; color: #fff; border-radius: 50%; }
 
 .tab-content-wrapper { flex: 1; display: flex; flex-direction: column; height: 100%; }
+.packages-empty { flex: 1; display: grid; place-items: center; }
 .toolbar { padding: 8px 16px; background: #fff; border-bottom: 1px solid #ebeef5; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
+.package-list-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.package-search { width: min(320px, 30vw); }
 .breadcrumb { font-size: 13px; color: #606266; }
 .breadcrumb .group-id { color: #909399; }
 .breadcrumb .separator { margin: 0 6px; color: #c0c4cc; }
 .breadcrumb .artifact-id { color: #303133; font-weight: 600; }
 .wrench-icon svg { width: 1em; height: 1em; }
+.type-tag { margin-right: 4px; }
 
 .split-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; padding: 0; }
 
@@ -469,10 +617,6 @@ defineExpose({
 :deep(.custom-table .el-table__body tr.current-row > td.el-table__cell) { background-color: #fdf6ec !important; color: #303133; }
 :deep(.custom-table .el-table__body tr:hover > td.el-table__cell) { background-color: #f5f7fa !important; }
 
-.status-badge { font-size: 12px; padding: 2px 6px; border-radius: 2px; }
-.status-badge.error { background: #fef0f0; color: #f56c6c; }
-.status-badge.success { background: #f0f9eb; color: #67c23a; }
-.status-badge.normal { background: #f4f4f5; color: #909399; }
 
 :deep(.detail-table th.el-table__cell) { background: #fff; }
 </style>

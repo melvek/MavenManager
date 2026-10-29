@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { Search, Folder, Document } from '@element-plus/icons-vue'
+import { Search, Folder, Document, Grid } from '@element-plus/icons-vue'
+import type { TreeNode } from '../types'
 
 const props = defineProps<{
-  treeData: any[]
+  treeData: TreeNode[]
   width: number
+  isScanning: boolean
+  isRepositoryLoaded: boolean
 }>()
 
 // 修改抛出的事件
-const emit = defineEmits(['node-single-click', 'node-double-click', 'update:width'])
+const emit = defineEmits(['node-single-click', 'node-double-click', 'update:width', 'view-all'])
 
 // ================= 搜索过滤逻辑 =================
 const filterText = ref('')
@@ -106,6 +109,17 @@ const startResize = (e: MouseEvent) => {
 
 <template>
   <aside class="sidebar" :style="{ width: width + 'px' }">
+    <!--<div class="function-bar">
+      <el-button
+        class="view-all-button"
+        size="small"
+        :icon="Grid"
+        :disabled="!isRepositoryLoaded || isScanning"
+        @click="emit('view-all')"
+      >
+        查看全部
+      </el-button>
+    </div>-->
     <div class="search-box">
       <el-input 
         v-model="filterText" 
@@ -117,8 +131,18 @@ const startResize = (e: MouseEvent) => {
     </div>
     
     <div class="tree-wrapper" ref="treeWrapperRef">
+      <el-empty
+        v-if="isScanning || !isRepositoryLoaded"
+        :description="isScanning ? '正在扫描仓库…' : '请扫描仓库后查看依赖'"
+        :image-size="56"
+      />
+      <el-empty
+        v-else-if="treeData.length === 0"
+        description="仓库中没有可展示的依赖"
+        :image-size="56"
+      />
       <el-tree-v2
-        v-if="treeData.length > 0"
+        v-else
         ref="treeRef"
         :data="treeData"
         :props="{ value: 'id', label: 'label', children: 'children' }"
@@ -167,6 +191,13 @@ const startResize = (e: MouseEvent) => {
   gap: 8px; 
   --wails-draggable: no-drag; 
 }
+.function-bar {
+  display: flex;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+  --wails-draggable: no-drag;
+}
+.view-all-button { width: 100%; }
 .tree-wrapper { 
   flex: 1; 
   position: relative; 
@@ -174,6 +205,7 @@ const startResize = (e: MouseEvent) => {
   padding: 6px 0; 
   --wails-draggable: no-drag; 
 }
+.tree-wrapper :deep(.el-empty) { height: 100%; }
 .custom-tree-node { 
   display: flex; align-items: center; gap: 6px; 
   user-select: none; width: 100%; height: 100%;

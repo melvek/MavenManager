@@ -28,6 +28,10 @@ export function ExportArtifactVersions(repoPath: string, artifacts: catalog$0.Ar
     return $Call.ByID(2127692300, repoPath, artifacts, scriptType);
 }
 
+export function GetAllArtifactVersions(): $CancellablePromise<catalog$0.ArtifactVersionSummary[] | null> {
+    return $Call.ByID(4073728845);
+}
+
 export function GetArtifactVersions(groupId: string, artifactId: string): $CancellablePromise<catalog$0.VersionDetail[] | null> {
     return $Call.ByID(1214864488, groupId, artifactId);
 }

@@ -202,9 +202,76 @@ func (s *RepoService) GetTree() []*catalog.TreeNode {
 
 func (s *RepoService) GetArtifactVersions(groupId, artifactId string) []catalog.VersionDetail {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	key := fmt.Sprintf("%s:%s", groupId, artifactId)
-	return s.versions[key]
+	files := append([]catalog.VersionDetail(nil), s.versions[key]...)
+	s.mu.RUnlock()
+
+	details := make([]catalog.VersionDetail, 0, len(files))
+	for _, file := range files {
+		if strings.HasSuffix(file.FileName, ".pom") {
+			packaging, err := catalog.ReadPackaging(file.Path)
+			if err != nil && !errors.Is(err, catalog.ErrInvalidPOM) {
+				log.Printf("无法读取 POM packaging: %s, 错误: %v", file.Path, err)
+			} else if err == nil {
+				file.Packaging = packaging
+			}
+		}
+		details = append(details, file)
+
+		if !strings.HasSuffix(file.FileName, ".jar") && !strings.HasSuffix(file.FileName, ".pom") {
+			continue
+		}
+		checksumPath := file.Path + ".sha1"
+		info, err := os.Stat(checksumPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("无法读取依赖校验文件: %s, 错误: %v", checksumPath, err)
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		details = append(details, catalog.VersionDetail{
+			Version: file.Version, FileName: file.FileName + ".sha1",
+			Size: info.Size(), ModTime: info.ModTime(), Path: checksumPath,
+		})
+	}
+	return details
+}
+
+func (s *RepoService) GetAllArtifactVersions() []catalog.ArtifactVersionSummary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	summaries := make([]catalog.ArtifactVersionSummary, 0)
+	for key, files := range s.versions {
+		groupID, artifactID, ok := strings.Cut(key, ":")
+		if !ok {
+			continue
+		}
+		versions := make(map[string]time.Time)
+		for _, file := range files {
+			if modTime, exists := versions[file.Version]; !exists || file.ModTime.After(modTime) {
+				versions[file.Version] = file.ModTime
+			}
+		}
+		for version, modTime := range versions {
+			summaries = append(summaries, catalog.ArtifactVersionSummary{
+				GroupID: groupID, ArtifactID: artifactID, Version: version, ModTime: modTime,
+			})
+		}
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		if summaries[i].GroupID != summaries[j].GroupID {
+			return summaries[i].GroupID < summaries[j].GroupID
+		}
+		if summaries[i].ArtifactID != summaries[j].ArtifactID {
+			return summaries[i].ArtifactID < summaries[j].ArtifactID
+		}
+		return summaries[i].Version < summaries[j].Version
+	})
+	return summaries
 }
 
 func (s *RepoService) ScanGarbage(repoPath string, options map[string]bool) []catalog.GarbageItem {
@@ -697,7 +764,7 @@ func (s *RepoService) refreshArtifactVersion(repoPath, groupID, artifactID, vers
 
 	files := make([]catalog.VersionDetail, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".jar") || strings.HasSuffix(entry.Name(), ".pom")) {
+		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".jar") && !strings.HasSuffix(entry.Name(), ".pom")) {
 			continue
 		}
 		path := filepath.Join(versionDir, entry.Name())

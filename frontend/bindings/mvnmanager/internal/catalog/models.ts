@@ -7,6 +7,13 @@ export interface ArtifactCoordinate {
     "version": string;
 }
 
+export interface ArtifactVersionSummary {
+    "groupId": string;
+    "artifactId": string;
+    "version": string;
+    "modTime": string;
+}
+
 export interface GarbageItem {
     "id": string;
     "path": string;
@@ -82,4 +89,5 @@ export interface VersionDetail {
      * 用于删除
      */
     "path": string;
+    "packaging"?: string;
 }

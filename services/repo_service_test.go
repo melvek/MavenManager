@@ -9,10 +9,40 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"mvnmanager/internal/catalog"
 	"mvnmanager/internal/config"
 )
+
+func TestGetAllArtifactVersionsSummarizesIndexedFiles(t *testing.T) {
+	firstTime := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	laterTime := firstTime.Add(time.Hour)
+	service := &RepoService{
+		versions: map[string][]catalog.VersionDetail{
+			"com.example:library": {
+				{Version: "1.0", FileName: "library-1.0.pom", ModTime: firstTime},
+				{Version: "1.0", FileName: "library-1.0.jar", ModTime: laterTime},
+				{Version: "2.0", FileName: "library-2.0.jar", ModTime: firstTime},
+			},
+			"org.example:plugin": {
+				{Version: "3.0", FileName: "plugin-3.0.pom", ModTime: laterTime},
+			},
+		},
+	}
+
+	got := service.GetAllArtifactVersions()
+	if len(got) != 3 {
+		t.Fatalf("GetAllArtifactVersions() returned %d rows, want 3", len(got))
+	}
+	if got[0].GroupID != "com.example" || got[0].ArtifactID != "library" ||
+		got[0].Version != "1.0" || !got[0].ModTime.Equal(laterTime) {
+		t.Errorf("first summary = %+v, want com.example:library:1.0 at %v", got[0], laterTime)
+	}
+	if got[2].GroupID != "org.example" || got[2].ArtifactID != "plugin" {
+		t.Errorf("last summary = %+v, want org.example:plugin", got[2])
+	}
+}
 
 func TestScanGarbageDetectsMissingJarOnlyWhenEnabled(t *testing.T) {
 	repoPath := t.TempDir()

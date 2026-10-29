@@ -3,7 +3,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import { RepoService, ConfigService } from '../bindings/mvnmanager/services'
 import { Events } from '@wailsio/runtime'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { ArtifactCoordinate, TabItem, VersionGroup, AppConfig, RepositoryInfo, RepositoryOverview } from './types'
+import type { ArtifactCoordinate, ArtifactVersionSummary, TabItem, TreeNode, VersionGroup, AppConfig, RepositoryInfo, RepositoryOverview } from './types'
 
 import TopBar from './components/TopBar.vue'
 import ScanDialog from './components/ScanDialog.vue'
@@ -31,7 +31,7 @@ const currentRepoPath = computed(() => {
 })
 
 const isScanning = ref(false)
-const treeData = ref<any[]>([])
+const treeData = ref<TreeNode[]>([])
 const scannedCount = ref(0)
 const totalFileCount = ref(0)
 const scanPhase = ref('processing')
@@ -39,9 +39,13 @@ const scanCurrentPath = ref('')
 const repositoryOverview = ref<RepositoryOverview | null>(null)
 const repositoryInfos = ref<Record<string, RepositoryInfo | undefined>>({})
 const showScanDialog = ref(false)
+const isRepositoryLoaded = ref(false)
+const allArtifactVersions = ref<ArtifactVersionSummary[]>([])
 
-const openedTabs = ref<TabItem[]>([])
-const activeTab = ref<string>('')
+const dashboardTab: TabItem = { id: 'dashboard', title: '仓库概览', type: 'dashboard' }
+const packagesTab: TabItem = { id: 'packages', title: '依赖列表', type: 'packages' }
+const openedTabs = ref<TabItem[]>([{ ...dashboardTab }])
+const activeTab = ref<string>(dashboardTab.id)
 const exportItems = ref<ArtifactCoordinate[]>([])
 const tabDataMap = ref<Record<string, VersionGroup[]>>({})
 const selectedVersionMap = ref<Record<string, VersionGroup>>({})
@@ -66,12 +70,23 @@ onMounted(async () => {
         lastScannedAt: new Date().toISOString()
       })
     }
-    treeData.value = (await RepoService.GetTree()) || []
+    try {
+      const loadedTree = await RepoService.GetTree()
+      treeData.value = (loadedTree ?? []).filter((node): node is TreeNode => node !== null)
+      allArtifactVersions.value = (await RepoService.GetAllArtifactVersions()) ?? []
+      isRepositoryLoaded.value = true
+    } catch (error) {
+      isRepositoryLoaded.value = false
+      showScanDialog.value = false
+      ElMessage.error(`加载依赖索引失败：${String(error)}`)
+      return
+    }
     setTimeout(() => { showScanDialog.value = false }, 2000)
   })
 
   Events.On('load_assets_error', (event: any) => {
     isScanning.value = false
+    isRepositoryLoaded.value = false
     showScanDialog.value = false
     ElMessage.error(`仓库扫描失败：${event.data.message}`)
   })
@@ -97,6 +112,11 @@ const saveRepositoryInfo = async (repoId: string, info: RepositoryInfo) => {
   } catch (error) {
     ElMessage.error(`保存仓库信息失败：${String(error)}`)
   }
+}
+
+const refreshAllArtifactVersions = async () => {
+  if (!isRepositoryLoaded.value) return
+  allArtifactVersions.value = (await RepoService.GetAllArtifactVersions()) ?? []
 }
 
 // ================= 核心：Tab 管理逻辑 =================
@@ -150,6 +170,8 @@ const handleSingleClick = (data: any) => openArtifactTab(data, false);
 const handleDoubleClick = (data: any) => openArtifactTab(data, true);
 const handleCleanupOpenArtifact = (data: { groupId: string; artifactId: string; version: string }) =>
   openArtifactTab(data, true)
+const handlePackageOpen = (data: { groupId: string; artifactId: string }) =>
+  openArtifactTab(data, true)
 
 const handleAddExportArtifact = (artifact: ArtifactCoordinate) => {
   const exists = exportItems.value.some(item =>
@@ -166,6 +188,35 @@ const handleAddExportArtifact = (artifact: ArtifactCoordinate) => {
   activeTab.value = tabId
   if (exists) ElMessage.info('该依赖版本已在导出列表中')
   else ElMessage.success(`已添加 ${artifact.artifactId}-${artifact.version}`)
+}
+
+const handleAddExportArtifacts = (artifacts: ArtifactCoordinate[]) => {
+  const existing = new Set(exportItems.value.map(item =>
+    `${item.groupId}:${item.artifactId}:${item.version}`
+  ))
+  let added = 0
+  for (const artifact of artifacts) {
+    const key = `${artifact.groupId}:${artifact.artifactId}:${artifact.version}`
+    if (existing.has(key)) continue
+    existing.add(key)
+    exportItems.value.push({ ...artifact })
+    added++
+  }
+  const tabId = 'export-tool'
+  if (!openedTabs.value.some(tab => tab.id === tabId)) {
+    openedTabs.value.push({ id: tabId, title: '导出列表', type: 'export' })
+  }
+  activeTab.value = tabId
+  if (added === 0) ElMessage.info('所选依赖版本已全部在导出列表中')
+  else ElMessage.success(`已加入 ${added} 个依赖版本到导出列表`)
+}
+
+const handleViewAllPackages = () => {
+  if (!isRepositoryLoaded.value) return
+  if (!openedTabs.value.some(tab => tab.id === packagesTab.id)) {
+    openedTabs.value.push({ ...packagesTab })
+  }
+  activeTab.value = packagesTab.id
 }
 
 const handleRemoveExportArtifact = (artifact: ArtifactCoordinate) => {
@@ -195,12 +246,12 @@ const handleSwitchRepo = async (repoId: string) => {
     ElMessage.error(`保存当前仓库失败：${String(error)}`)
     return
   }
-  
   treeData.value = []
-  openedTabs.value = openedTabs.value.filter(t => t.type === 'cleanup')
+  allArtifactVersions.value = []
+  isRepositoryLoaded.value = false
+  openedTabs.value = [{ ...dashboardTab }]
+  activeTab.value = dashboardTab.id
   exportItems.value = []
-  if (openedTabs.value.length > 0) activeTab.value = openedTabs.value[0].id
-  else activeTab.value = ''
   
   tabDataMap.value = {}
   selectedVersionMap.value = {}
@@ -232,6 +283,8 @@ const startScan = async () => {
   scanPhase.value = 'counting'
   scanCurrentPath.value = currentRepoPath.value
   treeData.value = []
+  allArtifactVersions.value = []
+  isRepositoryLoaded.value = false
   try {
     await RepoService.LoadAssets(currentRepoPath.value)
   } catch (error) {
@@ -275,6 +328,7 @@ const handleSaveRepoManager = async (newConfig: AppConfig) => {
       newConfig.activeRepoId = ''
     }
   }
+  const activeRepositoryPathChanged = changedPaths.some(repo => repo.id === newConfig.activeRepoId)
 
   try {
     await ConfigService.SaveConfig(newConfig)
@@ -290,10 +344,15 @@ const handleSaveRepoManager = async (newConfig: AppConfig) => {
 
   appConfig.value = newConfig
   repositoryOverview.value = repositoryInfos.value[newConfig.activeRepoId]?.overview ?? null
-  treeData.value = []
-  if (previousActiveRepoId !== newConfig.activeRepoId) {
-    openedTabs.value = []
-    activeTab.value = ''
+  const activeRepositoryChanged =
+    previousActiveRepoId !== newConfig.activeRepoId || activeRepositoryPathChanged
+  if (activeRepositoryChanged) {
+    treeData.value = []
+    allArtifactVersions.value = []
+    isRepositoryLoaded.value = false
+    openedTabs.value = [{ ...dashboardTab }]
+    activeTab.value = dashboardTab.id
+    exportItems.value = []
     tabDataMap.value = {}
     selectedVersionMap.value = {}
   }
@@ -318,11 +377,17 @@ const loadTabData = async (tabId: string, groupId: string, artifactId: string, f
 
     versionGroups = Object.keys(groups).map(version => {
       const files = groups[version].sort((a, b) => a.fileName.localeCompare(b.fileName))
+      const isPom = files.some(file =>
+        file.fileName.endsWith('.pom') && file.packaging?.toLowerCase() === 'pom'
+      )
       return { 
         version, files, 
         totalSize: files.reduce((sum, f) => sum + f.size, 0),
         latestModTime: files.reduce((latest, f) => new Date(f.modTime) > new Date(latest) ? f.modTime : latest, files[0]?.modTime || ''),
-        hasJar: files.some(f => f.fileName.endsWith('.jar')),
+        isPom: files.some(f => f.fileName.endsWith('.pom') && (f.packaging ?? '').toLowerCase() === 'pom'),
+        hasJar: files.some(f => f.fileName.endsWith('.jar') && !f.fileName.endsWith('-sources.jar')),
+        hasSource: files.some(f => f.fileName.endsWith('-sources.jar')),
+        hasSha1: files.some(f => f.fileName.endsWith('.sha1')),
         hasPom: files.some(f => f.fileName.endsWith('.pom')),
         hasRemote: files.some(f => f.fileName === '_remote.repositories'),
         hasLastUpdated: files.some(f => f.fileName.endsWith('.lastUpdated'))
@@ -353,6 +418,7 @@ const handleArtifactRefresh = async (data: {
   artifactId: string
 }) => {
   await loadTabData(data.tabId, data.groupId, data.artifactId, true)
+  await refreshAllArtifactVersions()
 }
 
 const handleArtifactVersionDeleted = async (data: { tabId: string; version: string }) => {
@@ -371,6 +437,7 @@ const handleArtifactVersionDeleted = async (data: { tabId: string; version: stri
     delete selectedVersionMap.value[data.tabId]
     mainContentRef.value?.clearHighlight(data.tabId)
   }
+  await refreshAllArtifactVersions()
 }
 
 const handleRowClick = ({ tabId, row }: { tabId: string, row: VersionGroup }) => {
@@ -394,6 +461,7 @@ const handleCloseDetail = (tabId: string) => {
 }
 
 const handleTabRemove = (targetName: string) => {
+  if (targetName === dashboardTab.id) return
   const tabs = openedTabs.value
   let activeName = activeTab.value
   if (activeName === targetName) {
@@ -449,14 +517,19 @@ const handleTabChange = (tabId: string) => {
       <SidebarTree 
         v-model:width="sidebarWidth" 
         :treeData="treeData" 
+        :isScanning="isScanning"
+        :isRepositoryLoaded="isRepositoryLoaded"
         @node-single-click="handleSingleClick"
         @node-double-click="handleDoubleClick"
+        @view-all="handleViewAllPackages"
       />
       
       <MainContent 
         ref="mainContentRef"
         v-model:activeTab="activeTab"
         :openedTabs="openedTabs"
+        :treeData="treeData"
+        :allArtifactVersions="allArtifactVersions"
         :exportItems="exportItems"
         :tabDataMap="tabDataMap"
         :selectedVersionMap="selectedVersionMap"
@@ -474,6 +547,8 @@ const handleTabChange = (tabId: string) => {
         @close-detail="handleCloseDetail"
         @cleanup-done="handleCleanupDone"
         @cleanup-open-artifact="handleCleanupOpenArtifact"
+        @open-package="handlePackageOpen"
+        @add-export-artifacts="handleAddExportArtifacts"
         @artifact-refresh="handleArtifactRefresh"
         @artifact-version-deleted="handleArtifactVersionDeleted"
         @add-export-artifact="handleAddExportArtifact"

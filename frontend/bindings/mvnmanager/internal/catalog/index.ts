@@ -3,6 +3,7 @@
 
 export type {
     ArtifactCoordinate,
+    ArtifactVersionSummary,
     GarbageItem,
     RepositoryOverview,
     TreeNode,
